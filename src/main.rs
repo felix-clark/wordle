@@ -256,6 +256,7 @@ fn run_solve_repl() -> anyhow::Result<()> {
         let best_guess_str = word_to_string(best_guess);
         println!("Best guess: {best_guess_str}");
         println!("Input guess (leave blank for recommended):");
+        line_buf.drain(..);
         let _bin = std::io::stdin().read_line(&mut line_buf).expect("Could not read stdin");
         let trimmed = line_buf.trim();
         let guess: Word<5> = if trimmed.is_empty() {
@@ -265,6 +266,7 @@ fn run_solve_repl() -> anyhow::Result<()> {
         };
         let guess_str = word_to_string(guess);
         println!("Input feedback for {guess_str}:");
+        line_buf.drain(..);
         let _bin = std::io::stdin().read_line(&mut line_buf).expect("Could not read stdin");
         let feedback = read_feedback::<5>(&line_buf.trim())?;
         avail_solutions = reduce_dict(&avail_solutions, &guess, &feedback);
