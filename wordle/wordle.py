@@ -308,9 +308,12 @@ def main():
 
     guesses = [
         "RAISE",
-        "RILES",
+        "ARISE",
+        "ROATE",
         "SLATE",
+        "RILES",
         "IRATE",
+        "RESIN",
         "ROAST",
         "NOTES",
         "RESIN",
