@@ -180,7 +180,13 @@ fn get_expect_remain_after(dict: &[Word<5>], guess: &Word<5>) -> f32 {
     // let max_remain = n_remain.into_iter().max().unwrap();
     // max_remain as f32
     let norm = 1. / n_remain.len() as f32;
-    norm * n_remain.into_iter().map(|u| u as f32).sum::<f32>()
+    let sum_remain = n_remain.into_iter().map(|u| u as f32).sum::<f32>();
+    // subtract 1 if the word is in the dictionary to prefer possible correct answers
+    norm * if dict.iter().any(|w| w == guess) {
+        sum_remain - 1.
+    } else {
+        sum_remain
+    }
 }
 
 fn get_best_expect(dict: &[Word<5>], pool: &[Word<5>]) -> (Word<5>, f32) {
