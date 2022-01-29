@@ -7,7 +7,8 @@ use crate::counter::Counter;
 use crate::Word;
 
 pub(crate) struct LettCountDist<const M: usize> {
-    lett_freqs: BTreeMap<u8, BTreeMap<usize, f32>>,
+    lett_cts: BTreeMap<u8, BTreeMap<usize, usize>>,
+    dict_size: usize,
 }
 
 impl<const M: usize> LettCountDist<M> {
@@ -35,29 +36,25 @@ impl<const M: usize> LettCountDist<M> {
             let sum_cts = ct_ctr.values().sum::<usize>();
             ct_ctr.insert(0, dict_size - sum_cts);
         }
-        let norm = 1. / dict_size as f32;
-        let lett_freqs: BTreeMap<u8, BTreeMap<usize, f32>> = lett_cts
-            .into_iter()
-            .map(|(l, cts)| {
-                let freqs = cts.into_iter().map(|(k, v)| (k, v as f32 * norm)).collect();
-                (l, freqs)
-            })
-            .collect();
-        Self { lett_freqs }
+        Self {
+            lett_cts,
+            dict_size,
+        }
     }
 
     pub(crate) fn entropy(&self, word: &Word<M>) -> f32 {
+        let norm: f32 = 1. / self.dict_size as f32;
         let word_ctr: Counter = word.iter().cloned().collect();
         // The response can determine the exact letter count if the dictionary word has fewer
         // instances of a given letter than the guess does.
         // If a dictionary word has as many or more instances of a letter relative to a guess word,
         // we only know it has at least that many.
         -self
-            .lett_freqs
+            .lett_cts
             .iter()
             .map(|(l, l_freq)| {
                 let l_ct = word_ctr.get(l);
-                let ps: Vec<f32> = l_freq
+                let ns: Vec<usize> = l_freq
                     .iter()
                     .filter_map(
                         |(lett_count, freq)| {
@@ -69,11 +66,13 @@ impl<const M: usize> LettCountDist<M> {
                         },
                     )
                     .collect();
-                let p_rem = 1. - ps.iter().sum::<f32>();
-                ps.into_iter()
-                    .chain(iter::once(p_rem))
-                    .map(xlnx)
-                    .sum::<f32>()
+                let n_rem = self.dict_size - ns.iter().sum::<usize>();
+                let ps: Vec<f32> = ns
+                    .into_iter()
+                    .chain(iter::once(n_rem))
+                    .map(|n| n as f32 * norm)
+                    .collect();
+                ps.into_iter().map(xlnx).sum::<f32>()
             })
             .sum::<f32>()
     }
