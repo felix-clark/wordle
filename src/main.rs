@@ -2,7 +2,7 @@ use anyhow::anyhow;
 use clap::Parser;
 use itertools::{all, any, Itertools};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
@@ -33,13 +33,15 @@ enum LettFb {
 type Feedback<const M: usize> = [LettFb; M];
 
 fn read_feedback<const M: usize>(s: &str) -> anyhow::Result<Feedback<M>> {
-    let result: Vec<LettFb> = s.chars().map(|c| {
-        match c {
-            '-'=> Ok(LettFb::Grey),
-            '+'=> Ok(LettFb::Yellow),
-            '*'=> Ok(LettFb::Green),
+    let result: Vec<LettFb> = s
+        .chars()
+        .map(|c| match c {
+            '-' => Ok(LettFb::Grey),
+            '+' => Ok(LettFb::Yellow),
+            '*' => Ok(LettFb::Green),
             _ => Err(anyhow!("Invalid feedback string {s}")),
-        }}).collect::<Result<Vec<_>,_>>()?;
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let fb: Feedback<M> = result.as_slice().try_into()?;
     Ok(fb)
 }
@@ -205,45 +207,63 @@ fn get_best_expect(dict: &[Word<5>], pool: &[Word<5>]) -> (Word<5>, f32) {
 fn filter_top_heur(dict: &[Word<5>], pool: &[Word<5>], n: usize) -> Vec<Word<5>> {
     let lett_cnt_dist = LettCountDist::new(dict);
     let lett_loc_dist = LettLocDist::new(dict);
-    let lett_cnt_ents: Vec<f32> = pool
-        .par_iter()
-        .map(|w| lett_cnt_dist.entropy(w))
+    let lett_cnt_ents: Vec<f32> = pool.par_iter().map(|w| lett_cnt_dist.entropy(w)).collect();
+    let lett_loc_ents: Vec<f32> = pool.par_iter().map(|w| lett_loc_dist.entropy(w)).collect();
+    let total_ents: Vec<f32> = lett_cnt_ents
+        .iter()
+        .zip_eq(lett_loc_ents.iter())
+        .map(|(a, b)| a + b)
         .collect();
-    let lett_loc_ents: Vec<f32> = pool
-        .par_iter()
-        .map(|w| lett_loc_dist.entropy(w))
+    // The solution pool has to be queried specifically because an actual solution can be drowned
+    // out in the large dictionary
+    let lett_cnt_ents_dict: Vec<f32> = dict.par_iter().map(|w| lett_cnt_dist.entropy(w)).collect();
+    let lett_loc_ents_dict: Vec<f32> = dict.par_iter().map(|w| lett_loc_dist.entropy(w)).collect();
+    let total_ents_dict: Vec<f32> = lett_cnt_ents_dict
+        .iter()
+        .zip_eq(lett_loc_ents_dict.iter())
+        .map(|(a, b)| a + b)
         .collect();
-    let total_ents: Vec<f32> = lett_cnt_ents.iter().zip_eq(lett_loc_ents.iter()).map(|(a, b)| a+b).collect();
-    let mut total_ents_check = total_ents.clone();
+
+    let mut total_ents_dict_sort = total_ents_dict.clone();
+    let mut total_ents_sort = total_ents.clone();
 
     // TODO: We don't need to sort the whole list, we should be able to get the top n
-    total_ents_check.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
-    // TODO: make safe and robuts
-    let idx_max = if n > total_ents_check.len() {
+    total_ents_sort.sort_unstable_by(|a, b| {
+        a.partial_cmp(b)
+            .expect(&format!("could not compare {a}, {b}"))
+    });
+    total_ents_dict_sort.sort_unstable_by(|a, b| {
+        a.partial_cmp(b)
+            .expect(&format!("could not compare {a}, {b}"))
+    });
+
+    let idx_max = if n > total_ents_sort.len() {
         0
     } else {
-        total_ents_check.len() - n
+        total_ents_sort.len() - n
     };
-    let ent_cutoff = total_ents_check[idx_max];
-    let pass = total_ents.into_iter().zip_eq(pool.iter()).filter_map(|(s, w)| if s >= ent_cutoff {Some(*w)} else {None}).collect();
-    pass
-}
+    let ent_cutoff = total_ents_sort[idx_max];
+    let idx_max = if n > total_ents_dict_sort.len() {
+        0
+    } else {
+        total_ents_dict_sort.len() - n
+    };
+    let ent_cutoff_dict = total_ents_dict_sort[idx_max];
 
-fn get_best_expect_heur(dict: &[Word<5>], pool: &[Word<5>]) -> (Word<5>, f32) {
-    let lett_cnt_dist = LettCountDist::new(dict);
-    let lett_loc_dist = LettLocDist::new(dict);
-    let lett_cnt_ents: Vec<f32> = pool
-        .par_iter()
-        .map(|w| lett_cnt_dist.entropy(w))
-        .collect();
-    let lett_loc_ents: Vec<f32> = pool
-        .par_iter()
-        .map(|w| lett_loc_dist.entropy(w))
-        .collect();
-    let total_ents: Vec<f32> = lett_cnt_ents.iter().zip_eq(lett_loc_ents.iter()).map(|(a, b)| a+b).collect();
-
-    let (approx_ent, best_guess) = total_ents.iter().zip_eq(pool.iter()).max_by(|(entx, _), (enty, _)| entx.partial_cmp(enty).unwrap()).unwrap();
-    (*best_guess, *approx_ent)
+    let pass_pool = total_ents
+        .into_iter()
+        .zip_eq(pool.iter())
+        .filter_map(|(s, w)| if s >= ent_cutoff { Some(*w) } else { None });
+    let pass_dict = total_ents_dict
+        .into_iter()
+        .zip_eq(dict.iter())
+        .filter_map(|(s, w)| if s >= ent_cutoff_dict { Some(*w) } else { None });
+    let pass_all = pass_pool
+        .chain(pass_dict)
+        .collect::<HashSet<Word<5>>>()
+        .into_iter()
+        .collect_vec();
+    pass_all
 }
 
 fn word_to_string<const M: usize>(w: Word<M>) -> String {
@@ -252,34 +272,69 @@ fn word_to_string<const M: usize>(w: Word<M>) -> String {
 
 fn run_solve_repl() -> anyhow::Result<()> {
     let sol_dict = get_dictionary()?;
-    let full_dict: Vec<Word<5>> = sol_dict.iter().to_owned().chain(get_extra_dict()?.iter()).cloned().collect();
+    let full_dict: Vec<Word<5>> = sol_dict
+        .iter()
+        .to_owned()
+        .chain(get_extra_dict()?.iter())
+        .cloned()
+        .collect();
+
+    let mut guess_hist: Vec<(Word<5>, Feedback<5>)> = Vec::new();
 
     let mut line_buf = String::new();
     let mut avail_solutions = sol_dict.clone();
     while avail_solutions.len() > 1 {
         let filtered_by_heur = filter_top_heur(&avail_solutions, &full_dict, 24);
-        let (best_guess, _) = get_best_expect(&avail_solutions, &filtered_by_heur);
+        // let n_filtered = filtered_by_heur.len();
+        // println!("{n_filtered} filtered");
+        let (best_guess, exp_n) = get_best_expect(&avail_solutions, &filtered_by_heur);
         let best_guess_str = word_to_string(best_guess);
-        println!("Best guess: {best_guess_str}");
+        println!("Best guess: {best_guess_str} ({exp_n:.2})");
         println!("Input guess (leave blank for recommended):");
         line_buf.drain(..);
-        let _bin = std::io::stdin().read_line(&mut line_buf).expect("Could not read stdin");
+        let _bin = std::io::stdin()
+            .read_line(&mut line_buf)
+            .expect("Could not read stdin");
         let trimmed = line_buf.trim();
         let guess: Word<5> = if trimmed.is_empty() {
             best_guess
         } else {
-            trimmed.as_bytes().try_into()?
+            trimmed.to_ascii_uppercase().as_bytes().try_into()?
         };
         let guess_str = word_to_string(guess);
         println!("Input feedback for {guess_str}:");
         line_buf.drain(..);
-        let _bin = std::io::stdin().read_line(&mut line_buf).expect("Could not read stdin");
+        let _bin = std::io::stdin()
+            .read_line(&mut line_buf)
+            .expect("Could not read stdin");
         let feedback = read_feedback::<5>(&line_buf.trim())?;
         avail_solutions = reduce_dict(&avail_solutions, &guess, &feedback);
         let n_remain = avail_solutions.len();
         println!("{n_remain} solutions left");
+        if n_remain < 8 && n_remain > 1 {
+            let words: String = avail_solutions
+                .iter()
+                .cloned()
+                .map(word_to_string)
+                .intersperse("\t".to_string())
+                .collect();
+            println!("{words}");
+        }
+        guess_hist.push((guess, feedback));
     }
     if avail_solutions.is_empty() {
+        println!("No solutions found!");
+        let mut alt_solutions = full_dict.clone();
+        for (gw, fb) in guess_hist {
+            alt_solutions = reduce_dict(&alt_solutions, &gw, &fb);
+        }
+        println!("Possible extended options:");
+        let alt_solutions_str: String = alt_solutions
+            .into_iter()
+            .map(word_to_string)
+            .intersperse(" ".to_string())
+            .collect();
+        println!("{alt_solutions_str}");
         return Err(anyhow!("No solutions found!"));
     } else {
         let solution = word_to_string(avail_solutions[0]);
@@ -318,14 +373,16 @@ fn run_test() -> anyhow::Result<()> {
     }
 
     let filtered = filter_top_heur(&sol_dict, &sol_dict, 24);
-    let filtered_strings = filtered.iter().map(|w| std::str::from_utf8(w).unwrap()).collect_vec();
+    let filtered_strings = filtered
+        .iter()
+        .map(|w| std::str::from_utf8(w).unwrap())
+        .collect_vec();
     println!("{filtered_strings:?}");
 
     // let (best_guess, approx_ent) = get_best_expect_heur(&sol_dict, &filtered);
     let (best_guess, approx_ent) = get_best_expect(&sol_dict, &filtered);
     let best_guess: String = String::from_utf8(best_guess.to_vec())?;
     println!("{best_guess}:\t{approx_ent:.2}");
-    todo!();
 
     // let (best_guess, exp_left) = get_best_expect(&sol_dict, &sol_dict);
     // let best_guess: String = String::from_utf8(best_guess.to_vec())?;
@@ -336,7 +393,6 @@ fn run_test() -> anyhow::Result<()> {
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    println!("{args:?}");
     match args.prog.as_str() {
         "test" => {
             run_test()?;
