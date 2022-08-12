@@ -16,6 +16,8 @@ use letter_dist::{LettCountDist, LettLocDist};
 struct Args {
     #[clap(takes_value = true, possible_values = ["test", "solve", "play"])]
     prog: String,
+    #[clap(takes_value = true)]
+    first_guess: Option<String>,
 }
 
 type Word<const M: usize> = [u8; M];
@@ -270,7 +272,7 @@ fn word_to_string<const M: usize>(w: Word<M>) -> String {
     String::from_utf8(w.to_vec()).expect("Invalid UTF8")
 }
 
-fn run_solve_repl() -> anyhow::Result<()> {
+fn run_solve_repl(init: Option<String>) -> anyhow::Result<()> {
     let sol_dict = get_dictionary()?;
     let full_dict: Vec<Word<5>> = sol_dict
         .iter()
@@ -280,9 +282,23 @@ fn run_solve_repl() -> anyhow::Result<()> {
         .collect();
 
     let mut guess_hist: Vec<(Word<5>, Feedback<5>)> = Vec::new();
-
-    let mut line_buf = String::new();
     let mut avail_solutions = sol_dict.clone();
+    let mut line_buf = String::new();
+
+    if let Some(first_guess) = init {
+        let first_guess = first_guess.to_ascii_uppercase();
+        println!("Input feedback for {first_guess}:");
+        line_buf.drain(..);
+        let _bin = std::io::stdin()
+            .read_line(&mut line_buf)
+            .expect("Could not read stdin");
+        let feedback = read_feedback::<5>(&line_buf.trim())?;
+        let first_guess: Word<5> = first_guess.as_bytes().try_into()?;
+        avail_solutions = reduce_dict(&avail_solutions, &first_guess, &feedback);
+        let n_remain = avail_solutions.len();
+        println!("{n_remain} solutions left");
+        guess_hist.push((first_guess, feedback));
+    }
     while avail_solutions.len() > 1 {
         let filtered_by_heur = filter_top_heur(&avail_solutions, &full_dict, 24);
         // let n_filtered = filtered_by_heur.len();
@@ -398,7 +414,7 @@ fn main() -> anyhow::Result<()> {
             run_test()?;
         }
         "solve" => {
-            run_solve_repl()?;
+            run_solve_repl(args.first_guess)?;
         }
         "play" => {
             todo!();
