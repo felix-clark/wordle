@@ -196,7 +196,7 @@ fn get_expect_remain_after(dict: &[Word<5>], guess: &Word<5>) -> f32 {
 fn get_best_expect(dict: &[Word<5>], pool: &[Word<5>]) -> (Word<5>, f32) {
     let exp_lefts: Vec<f32> = pool
         .par_iter()
-        .map(|w| get_expect_remain_after(&dict, w))
+        .map(|w| get_expect_remain_after(dict, w))
         .collect();
     let (exp_left, best_guess) = exp_lefts
         .iter()
@@ -232,11 +232,11 @@ fn filter_top_heur(dict: &[Word<5>], pool: &[Word<5>], n: usize) -> Vec<Word<5>>
     // TODO: We don't need to sort the whole list, we should be able to get the top n
     total_ents_sort.sort_unstable_by(|a, b| {
         a.partial_cmp(b)
-            .expect(&format!("could not compare {a}, {b}"))
+            .unwrap_or_else(|| panic!("could not compare {a}, {b}"))
     });
     total_ents_dict_sort.sort_unstable_by(|a, b| {
         a.partial_cmp(b)
-            .expect(&format!("could not compare {a}, {b}"))
+            .unwrap_or_else(|| panic!("could not compare {a}, {b}"))
     });
 
     let idx_max = if n > total_ents_sort.len() {
@@ -260,12 +260,11 @@ fn filter_top_heur(dict: &[Word<5>], pool: &[Word<5>], n: usize) -> Vec<Word<5>>
         .into_iter()
         .zip_eq(dict.iter())
         .filter_map(|(s, w)| if s >= ent_cutoff_dict { Some(*w) } else { None });
-    let pass_all = pass_pool
+    pass_pool
         .chain(pass_dict)
         .collect::<HashSet<Word<5>>>()
         .into_iter()
-        .collect_vec();
-    pass_all
+        .collect_vec()
 }
 
 fn word_to_string<const M: usize>(w: Word<M>) -> String {
@@ -282,7 +281,7 @@ fn run_solve_repl(init: Option<String>) -> anyhow::Result<()> {
         .collect();
 
     let mut guess_hist: Vec<(Word<5>, Feedback<5>)> = Vec::new();
-    let mut avail_solutions = sol_dict.clone();
+    let mut avail_solutions = sol_dict;
     let mut line_buf = String::new();
 
     if let Some(first_guess) = init {
@@ -292,7 +291,7 @@ fn run_solve_repl(init: Option<String>) -> anyhow::Result<()> {
         let _bin = std::io::stdin()
             .read_line(&mut line_buf)
             .expect("Could not read stdin");
-        let feedback = read_feedback::<5>(&line_buf.trim())?;
+        let feedback = read_feedback::<5>(line_buf.trim())?;
         let first_guess: Word<5> = first_guess.as_bytes().try_into()?;
         avail_solutions = reduce_dict(&avail_solutions, &first_guess, &feedback);
         let n_remain = avail_solutions.len();
@@ -323,7 +322,7 @@ fn run_solve_repl(init: Option<String>) -> anyhow::Result<()> {
         let _bin = std::io::stdin()
             .read_line(&mut line_buf)
             .expect("Could not read stdin");
-        let feedback = read_feedback::<5>(&line_buf.trim())?;
+        let feedback = read_feedback::<5>(line_buf.trim())?;
         avail_solutions = reduce_dict(&avail_solutions, &guess, &feedback);
         let n_remain = avail_solutions.len();
         println!("{n_remain} solutions left");
@@ -340,7 +339,7 @@ fn run_solve_repl(init: Option<String>) -> anyhow::Result<()> {
     }
     if avail_solutions.is_empty() {
         println!("No solutions found!");
-        let mut alt_solutions = full_dict.clone();
+        let mut alt_solutions = full_dict;
         for (gw, fb) in guess_hist {
             alt_solutions = reduce_dict(&alt_solutions, &gw, &fb);
         }
