@@ -14,9 +14,11 @@ use letter_dist::{LettCountDist, LettLocDist};
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
+    /// Mode of operation
     #[clap(takes_value = true, possible_values = ["test", "solve", "play"])]
     prog: String,
-    #[clap(takes_value = true)]
+    /// Initial word guess
+    #[clap(long, takes_value = true)]
     first_guess: Option<String>,
 }
 
