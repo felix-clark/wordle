@@ -298,6 +298,15 @@ fn run_solve_repl(init: Option<String>) -> anyhow::Result<()> {
         avail_solutions = reduce_dict(&avail_solutions, &first_guess, &feedback);
         let n_remain = avail_solutions.len();
         println!("{n_remain} solutions left");
+        if n_remain < 16 && n_remain > 1 {
+            let words: String = avail_solutions
+                .iter()
+                .cloned()
+                .map(word_to_string)
+                .intersperse("\t".to_string())
+                .collect();
+            println!("{words}");
+        }
         guess_hist.push((first_guess, feedback));
     }
     while avail_solutions.len() > 1 {
@@ -328,7 +337,7 @@ fn run_solve_repl(init: Option<String>) -> anyhow::Result<()> {
         avail_solutions = reduce_dict(&avail_solutions, &guess, &feedback);
         let n_remain = avail_solutions.len();
         println!("{n_remain} solutions left");
-        if n_remain < 8 && n_remain > 1 {
+        if n_remain < 16 && n_remain > 1 {
             let words: String = avail_solutions
                 .iter()
                 .cloned()
